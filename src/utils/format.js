@@ -1,11 +1,11 @@
 const debug = require("debug")("web3-providers-http-proxy:format");
-const { numToHex, setNull, delKeys } = require("./util");
+const { numToHex, setNull, delKeys } = require("./");
 const { format } = require("js-conflux-sdk");
 
 const EPOCH_MAP = {
   earliest: "earliest",
   latest: "latest_state",
-  pending: "latest_state"
+  pending: "latest_state"  // TODO there is no correct 'pending' tag in conflux
 };
 
 function formatEpoch(tag) {
@@ -13,12 +13,11 @@ function formatEpoch(tag) {
 }
   
 function formatEpochOfParams(params, index) {
-  if (params[index]) {
-    params[index] = formatEpoch(params[index]);
-  }
+  if (!params[index]) return;
+  params[index] = formatEpoch(params[index]);
 }
 
-// format from, to, gas, gasPrice
+// format commons: from, to, gas, gasPrice
 function formatCommonInput(params, networkId, txIndex = 0, epochIndex = 1) {
   let ti = txIndex;
   if (params[ti]) {
@@ -42,15 +41,13 @@ function formatCommonInput(params, networkId, txIndex = 0, epochIndex = 1) {
 
 function formatBlock(block) {
   block.number = block.epochNumber;
-  // sha3Uncles?
-  // logsBloom?
   block.stateRoot = block.deferredStateRoot;
   block.receiptsRoot = block.deferredReceiptsRoot;
-  // totalDifficulty?
-  // extraData?
-  block.uncles = block.refereeHashes; // check?
+  block.logsBloom = block.deferredLogsBloomHash;  // logsBloom?
+  block.uncles = []; // No uncles in conflux
   block.miner = format.hexAddress(block.miner);
-  block.totalDifficulty = block.difficulty;
+  block.totalDifficulty = block.difficulty;  // totalDifficulty?
+  block.extraData = '0x';
   // format tx object
   if (
     block.tranactions &&
@@ -74,19 +71,19 @@ function formatBlock(block) {
     "custom"
   ]);
   setNull(block, [
-    "extraData",
-    "logsBloom",
+    // "extraData",  // extraData?
     "mixHash",
-    "sha3Uncles",
+    "sha3Uncles",  // sha3Uncles?
   ]);
   return block;
 }
 
 function formatTransaction(tx) {
-  // blockNumber?  need set blockNumber
+  // blockNumber?
   tx.input = tx.data;
-  tx.from = format.hexAddress(tx.from);
-  tx.to = format.hexAddress(tx.to);
+  tx.from = formatHexAddress(tx.from);
+  tx.to = formatHexAddress(tx.to);
+  tx.v = numToHex(Number(tx.v) + Number(tx.chainId) * 2 + 35);
 
   delKeys(tx, [
     "data",
@@ -168,12 +165,12 @@ function deepFormatAnyAddress(
   tohex = false,
   cache = new Map()
 ) {
-  // from, to, contractAddress, contractConcrete, address, string
+  // from, to, contractAddress, contractConcreate, address, string
   // debug("deepFormatAddress obj", obj, typeof obj);
   if (!obj) return obj;
   if (cache.has(obj)) return cache.get(obj);
 
-  // console.log("pre format obj", obj, typeof obj);
+  debug("pre format obj", obj, typeof obj);
 
   let result = obj;
   if (typeof obj === "string") {
@@ -181,7 +178,7 @@ function deepFormatAnyAddress(
     cache.set(Object(obj), result);
   } else if (Array.isArray(obj)) {
     cache.set(Object(obj), obj);
-    // console.log("is array", Array.isArray(obj));
+    debug("is array", Array.isArray(obj));
     for (let i in obj) {
       obj[i] = deepFormatAnyAddress(obj[i], networkId, tohex, cache);
     }
@@ -202,6 +199,10 @@ function formatTxHexAddress(tx) {
   return format.callTxAdvance(0, true)(tx);
 }
 
+function formatHexAddress(address) {
+  return address ? format.hexAddress(address) : address
+}
+
 module.exports = {
   formatCommonInput,
   formatTransaction,
@@ -210,7 +211,7 @@ module.exports = {
   formatEpoch,
   formatEpochOfParams,
   formatAddress: format.address,
-  formatHexAddress: format.hexAddress,
+  formatHexAddress,
   formatTxHexAddress,
   deepFormatAddress: (obj, networkId) => deepFormatAnyAddress(obj, networkId),
   deepFormatHexAddress: obj => deepFormatAnyAddress(obj, 0, true),
